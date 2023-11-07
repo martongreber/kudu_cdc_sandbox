@@ -68,6 +68,8 @@
 
 #include "kudu/cfile/type_encodings.h"
 #include "kudu/common/common.pb.h"
+#include "kudu/client/client.h"
+#include "kudu/client/schema.h"
 #include "kudu/common/key_encoder.h"
 #include "kudu/common/partial_row.h"
 #include "kudu/common/partition.h"
@@ -6736,6 +6738,50 @@ void CatalogManager::AbortAndWaitForAllTasks(
   for (const auto& t : tables) {
     t->WaitTasksCompletion();
   }
+}
+
+Status CatalogManager::CreateCdcStateTableIfNeeded(rpc::RpcContext *rpc) {
+  // If CDC state table exists do nothing, otherwise create it.
+  scoped_refptr<TableInfo> table_info;
+  table_info = FindTableWithNameUnlocked(kCdcStateTableName);
+
+  if(!table_info) {
+    // Set up a CreateTable request internally.
+    CreateTableRequestPB req;
+    CreateTableResponsePB resp;
+    req.set_name(kCdcStateTableName);
+    req.set_table_type(DEFAULT_TABLE);
+
+    // TODO: maybe?
+    // // Explicitly set the number tablets if the corresponding flag is set, otherwise CreateTable
+    // // will use the same defaults as for regular tables.
+    // if (FLAGS_cdc_state_table_num_tablets > 0) {
+    //   req.set_num_tablets(FLAGS_cdc_state_table_num_tablets);
+    // }
+
+    client::KuduSchemaBuilder schema_builder;
+    schema_builder.AddColumn(master::kCdcStreamId)->Type(client::KuduColumnSchema::STRING);
+    schema_builder.AddColumn(master::kCdcTabletId)->Type(client::KuduColumnSchema::STRING);
+    schema_builder.AddColumn(master::kCdcCheckpoint)->Type(client::KuduColumnSchema::STRING);
+    // TODO!
+    // schema_builder.AddColumn(master::kCdcData)->Type(QLType::CreateTypeMap(
+    //     DataType::STRING, DataType::STRING));
+    schema_builder.SetPrimaryKey({master::kCdcStreamId, master::kCdcTabletId});
+
+    client::KuduSchema kudu_schema;
+    CHECK_OK(schema_builder.Build(&kudu_schema));
+
+    auto schema = client::KuduSchema::ToSchema(kudu_schema);
+    SchemaToPB(schema, req.mutable_schema());
+
+    Status s = CreateTable(&req, &resp, rpc);
+    // We do not lock here so it is technically possible that the table was already created.
+    // If so, there is nothing to do so we just ignore the "AlreadyPresent" error.
+    if (!s.ok() && !s.IsAlreadyPresent()) {
+      return s;
+    }
+  }
+  return Status::OK();
 }
 
 template<typename RespClass>

@@ -48,6 +48,7 @@
 #include "kudu/gutil/strings/stringpiece.h"
 #include "kudu/gutil/walltime.h"
 #include "kudu/master/master.pb.h"
+#include "kudu/master/master_defaults.h"
 #include "kudu/tablet/metadata.pb.h"
 #include "kudu/tserver/tablet_replica_lookup.h"
 #include "kudu/tserver/tserver.pb.h"
@@ -1326,6 +1327,8 @@ class CatalogManager : public tserver::TabletReplicaLookupIf {
 
   // Aborts all tasks belonging to 'tables' and waits for them to finish.
   void AbortAndWaitForAllTasks(const std::vector<scoped_refptr<TableInfo>>& tables);
+
+  Status CreateCdcStateTableIfNeeded(rpc::RpcContext *rpc);
 
   // Wait for the Hive Metastore notification log listener to process the latest
   // events, if the HMS integration is enabled. Handles setting the correct
